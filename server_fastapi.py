@@ -358,20 +358,17 @@ if __name__ == "__main__":
             use_jp_extra = True
 
             # 学習のバッチサイズ。VRAMのはみ出具合に応じて調整してください。
-            batch_size = 4
+            batch_size = 6
 
             # 学習のエポック数（データセットを合計何周するか）。
             # 100で多すぎるほどかもしれませんが、もっと多くやると質が上がるのかもしれません。
-            epochs = 100
+            epochs = 15
 
             # 保存頻度。何ステップごとにモデルを保存するか。分からなければデフォルトのままで。
-            save_every_steps = 1000
+            save_every_steps = 3
 
             # 音声ファイルの音量を正規化するかどうか
             normalize = False
-
-            # 音声ファイルの開始・終了にある無音区間を削除するかどうか
-            trim = False
 
             # 読みのエラーが出た場合にどうするか。
             # "raise"ならテキスト前処理が終わったら中断、"skip"なら読めない行は学習に使わない、"use"なら無理やり使う
@@ -386,7 +383,7 @@ if __name__ == "__main__":
                 save_every_steps=save_every_steps,
                 num_processes=2,
                 normalize=normalize,
-                trim=trim,
+                trim=False,
                 freeze_EN_bert=False,
                 freeze_JP_bert=False,
                 freeze_ZH_bert=False,
@@ -423,7 +420,7 @@ if __name__ == "__main__":
                 assets_root,
             ]
 
-            subprocess.run(command, capture_output=True, text=True)
+            subprocess.run(command, capture_output=False)
 
             return JSONResponse(content={"id": id})
         except:
