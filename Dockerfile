@@ -1,12 +1,21 @@
-FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+FROM aidockorg/python-cuda:3.10-v2-cuda-12.1.1-base-22.04
 
-RUN pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+RUN ln -s /usr/bin/python3.10 /usr/bin/python
 
-ENV CUDA_VISIBLE_DEVICES 0
-ENV MKL_SERVICE_FORCE_INTEL 1
-ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib/python3.10/site-packages/nvidia/cublas/lib:/opt/conda/lib/python3.10/site-packages/nvidia/cudnn/lib:/opt/conda/lib/python3.10/site-packages/torch/lib
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    lsb-release
+
+RUN curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && \
+    curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' > /etc/apt/sources.list.d/nvidia-container-toolkit.list && \
+    sed -i -e '/experimental/ s/^#//g' /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+RUN apt-get update && apt-get install -y nvidia-container-toolkit
 
 WORKDIR /work
 
 COPY requirements.txt ./
+RUN pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 RUN pip install -r requirements.txt

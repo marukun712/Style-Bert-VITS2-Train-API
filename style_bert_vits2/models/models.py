@@ -139,9 +139,7 @@ class TransformerCouplingBlock(nn.Module):
             #     isflow=True,
             #     gin_channels=self.gin_channels,
             # )
-            None
-            if share_parameter
-            else None
+            None if share_parameter else None
         )
 
         for i in range(n_flows):
@@ -418,9 +416,7 @@ class TextEncoder(nn.Module):
             + ja_bert_emb
             + en_bert_emb
             + style_emb
-        ) * math.sqrt(
-            self.hidden_channels
-        )  # [b, t, h]
+        ) * math.sqrt(self.hidden_channels)  # [b, t, h]
         x = torch.transpose(x, 1, -1)  # [b, h, t]
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
             x.dtype

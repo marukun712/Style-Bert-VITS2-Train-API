@@ -120,10 +120,11 @@ def __expand_number(m: re.Match[str]) -> str:
             return __INFLECT.number_to_words(num // 100) + " hundred"  # type: ignore
         else:
             return __INFLECT.number_to_words(
-                num, andword="", zero="oh", group=2  # type: ignore
-            ).replace(
-                ", ", " "
-            )  # type: ignore
+                num,
+                andword="",
+                zero="oh",
+                group=2,  # type: ignore
+            ).replace(", ", " ")  # type: ignore
     else:
         return __INFLECT.number_to_words(num, andword="")  # type: ignore
 

@@ -10,6 +10,8 @@ docker-compose up -d
 
 で API サーバーが起動します。
 
+## 以下、本家 README です。
+
 ---
 
 # Style-Bert-VITS2

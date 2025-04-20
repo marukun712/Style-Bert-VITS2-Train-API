@@ -4,8 +4,11 @@ TODO: server_editor.pyと統合する?
 """
 
 import argparse
+import io
 import os
+import subprocess
 import sys
+import uuid
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
@@ -15,12 +18,14 @@ import GPUtil
 import psutil
 import torch
 import uvicorn
+import yaml
 from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from scipy.io import wavfile
 
 from config import get_config
+from gradio_tabs.train import get_path, preprocess_all
 from style_bert_vits2.constants import (
     DEFAULT_ASSIST_TEXT_WEIGHT,
     DEFAULT_LENGTH,
@@ -35,6 +40,7 @@ from style_bert_vits2.constants import (
 )
 from style_bert_vits2.logging import logger
 from style_bert_vits2.nlp import bert_models
+from style_bert_vits2.nlp.japanese import pyopenjtalk_worker
 from style_bert_vits2.nlp.japanese import pyopenjtalk_worker as pyopenjtalk
 from style_bert_vits2.nlp.japanese.user_dict import update_dict
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
@@ -191,7 +197,7 @@ if __name__ == "__main__":
     ):
         """Infer text to speech(テキストから感情付き音声を生成する)"""
         logger.info(
-            f"{request.client.host}:{request.client.port}/voice  { unquote(str(request.query_params) )}"
+            f"{request.client.host}:{request.client.port}/voice  {unquote(str(request.query_params))}"
         )
         if request.method == "GET":
             logger.warning(
@@ -204,7 +210,11 @@ if __name__ == "__main__":
 
         if model_name:
             # load_models() の 処理内容が i の正当性を担保していることに注意
-            model_ids = [i for i, x in enumerate(model_holder.models_info) if x.name == model_name]
+            model_ids = [
+                i
+                for i, x in enumerate(model_holder.models_info)
+                if x.name == model_name
+            ]
             if not model_ids:
                 raise_validation_error(
                     f"model_name={model_name} not found", "model_name"
@@ -215,7 +225,7 @@ if __name__ == "__main__":
                     f"model_name={model_name} is ambiguous", "model_name"
                 )
             model_id = model_ids[0]
-            
+
         model = loaded_models[model_id]
         if speaker_name is None:
             if speaker_id not in model.id2spk.keys():
@@ -318,13 +328,114 @@ if __name__ == "__main__":
             "gpu": gpuInfo,
         }
 
+    @app.post("/train")
+    async def train(request: Request):
+        form = await request.form()
+        name = form["name"]
+        transcript = form["transcript"]
+        file = form["file"]
+
+        assert not isinstance(file, str)
+        file_content = await file.read()
+
+        audio_file = io.BytesIO(file_content)
+
+        id: str = str(uuid.uuid4())
+
+        os.makedirs(f"Data/{id}/raw", exist_ok=True)
+
+        with open(f"Data/{id}/raw/voice.wav", "xb") as f:
+            f.write(audio_file.getbuffer())
+
+        with open(f"Data/{id}/esd.list", "x") as f:
+            f.write(f"voice.wav|{name}|JP|{transcript}")
+
+        try:
+            # 上でつけたフォルダの名前`Data/{model_name}/`
+            model_name = id
+
+            # JP-Extra （日本語特化版）を使うかどうか。日本語の能力が向上する代わりに英語と中国語は使えなくなります。
+            use_jp_extra = True
+
+            # 学習のバッチサイズ。VRAMのはみ出具合に応じて調整してください。
+            batch_size = 4
+
+            # 学習のエポック数（データセットを合計何周するか）。
+            # 100で多すぎるほどかもしれませんが、もっと多くやると質が上がるのかもしれません。
+            epochs = 100
+
+            # 保存頻度。何ステップごとにモデルを保存するか。分からなければデフォルトのままで。
+            save_every_steps = 1000
+
+            # 音声ファイルの音量を正規化するかどうか
+            normalize = False
+
+            # 音声ファイルの開始・終了にある無音区間を削除するかどうか
+            trim = False
+
+            # 読みのエラーが出た場合にどうするか。
+            # "raise"ならテキスト前処理が終わったら中断、"skip"なら読めない行は学習に使わない、"use"なら無理やり使う
+            yomi_error = "skip"
+
+            pyopenjtalk_worker.initialize_worker()
+
+            preprocess_all(
+                model_name=model_name,
+                batch_size=batch_size,
+                epochs=epochs,
+                save_every_steps=save_every_steps,
+                num_processes=2,
+                normalize=normalize,
+                trim=trim,
+                freeze_EN_bert=False,
+                freeze_JP_bert=False,
+                freeze_ZH_bert=False,
+                freeze_style=False,
+                freeze_decoder=False,
+                use_jp_extra=use_jp_extra,
+                val_per_lang=0,
+                log_interval=200,
+                yomi_error=yomi_error,
+            )
+
+            # 上でつけたモデル名を入力。学習を途中からする場合はきちんとモデルが保存されているフォルダ名を入力。
+            model_name = id
+
+            paths = get_path(model_name)
+            dataset_path = str(paths.dataset_path)
+            config_path = str(paths.config_path)
+            assets_root = "model_assets/"
+
+            with open("default_config.yml", "r", encoding="utf-8") as f:
+                yml_data = yaml.safe_load(f)
+            yml_data["model_name"] = model_name
+            with open("config.yml", "w", encoding="utf-8") as f:
+                yaml.dump(yml_data, f, allow_unicode=True)
+
+            command = [
+                "python",
+                "train_ms_jp_extra.py",
+                "--config",
+                config_path,
+                "--model",
+                dataset_path,
+                "--assets_root",
+                assets_root,
+            ]
+
+            subprocess.run(command, capture_output=True, text=True)
+
+            return JSONResponse(content={"id": id})
+        except:
+            return JSONResponse(content={"error": "err!"})
+
     @app.get("/tools/get_audio", response_class=AudioResponse)
     def get_audio(
         request: Request, path: str = Query(..., description="local wav path")
     ):
         """wavデータを取得する"""
         logger.info(
-            f"{request.client.host}:{request.client.port}/tools/get_audio  { unquote(str(request.query_params) )}"
+            f"{request.client.host}:{request.client.port}/tools/get_audio  {unquote(str(request.query_params))}"
         )
         if not os.path.isfile(path):
             raise_validation_error(f"path={path} not found", "path")
